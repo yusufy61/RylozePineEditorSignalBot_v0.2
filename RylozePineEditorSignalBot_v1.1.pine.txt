@@ -1,0 +1,113 @@
+//@version=5
+strategy("Ryloze 15m W-Formasyonu + Fib 1.272 TP )", overlay=true, default_qty_type=strategy.cash, default_qty_value=1000)
+
+// Girdiler
+left  = input.int(3, "Pivot Left (bars)", minval=1)
+right = input.int(3, "Pivot Right (bars)", minval=1)
+fib_mult = input.float(1.272, "Fibonacci Uzantı", step=0.001)
+tolerance_pct = input.float(2.0, "Dipler Arası Tolerans (%)", step=0.1)
+min_height_pct = input.float(0.5, "Minimum yükseklik (tepe-dip) (%)", step=0.1)
+risk_pct = input.float(1.0, "Pozisyon büyüklüğü için portföy yüzdesi (%)", step=0.1)
+stop_buffer_pct = input.float(0.5, "Stop buffer (%) dipin altına", step=0.1)
+
+// Pivot'lar
+pl = ta.pivotlow(low, left, right)
+ph = ta.pivothigh(high, left, right)
+
+// Tipleri açıkça tanımla
+var float low1_price  = na
+var int   low1_bar    = na
+var float peak_price  = na
+var int   peak_bar    = na
+var float low2_price  = na
+var int   low2_bar    = na
+
+var bool pattern_active = false
+var int  pattern_id     = 0
+
+var float base = na
+var float peak = na
+var float fib_target_price = na
+
+// Pivot low oluştuğunda işlemler
+if not na(pl)
+    int pl_bar = bar_index - right
+    float pl_price = pl
+
+    if na(low1_price)
+        // İlk dip olarak kaydet
+        low1_price := pl_price
+        low1_bar   := pl_bar
+        // temizle diğerleri
+        peak_price := na
+        peak_bar   := na
+        low2_price := na
+        low2_bar   := na
+        pattern_active := false
+        base := na
+        peak := na
+        fib_target_price := na
+    else
+        // Eğer peak varsa ve bu low peak'ten sonra oluştuysa low2 olabilir
+        if not na(peak_price) and pl_bar > peak_bar
+            low2_price := pl_price
+            low2_bar   := pl_bar
+            float local_base = math.min(low1_price, low2_price)
+            float diff_pct = local_base != 0.0 ? (math.abs(low1_price - low2_price) / local_base) * 100.0 : 100.0
+            float height_pct = local_base != 0.0 ? ((peak_price - local_base) / local_base) * 100.0 : 0.0
+
+            if diff_pct <= tolerance_pct and height_pct >= min_height_pct
+                pattern_active := true
+                pattern_id += 1
+                base := local_base
+                peak := peak_price
+            else
+                // Uygun değilse low1'i low2 yap ve yeniden başla
+                low1_price := low2_price
+                low1_bar   := low2_bar
+                peak_price := na
+                peak_bar   := na
+                low2_price := na
+                low2_bar   := na
+                base := na
+                peak := na
+                fib_target_price := na
+
+// Pivot high oluştuğunda işlemler
+if not na(ph)
+    int ph_bar = bar_index - right
+    float ph_price = ph
+    if not na(low1_price) and ph_bar > low1_bar
+        peak_price := ph_price
+        peak_bar   := ph_bar
+        // low2'yi temizle, yeni düşük aranacak
+        low2_price := na
+        low2_bar   := na
+        pattern_active := false
+        base := na
+        peak := na
+        fib_target_price := na
+
+// Fibonacci hedefini hesapla
+if not na(base) and not na(peak)
+    fib_target_price := base + (peak - base) * fib_mult
+else
+    fib_target_price := na
+
+// Giriş: fiyat peak'i kırarsa (kapanış ile) ve pattern aktif ise long aç
+canEnter = pattern_active and not na(peak) and ta.crossover(close, peak) and strategy.position_size == 0
+if canEnter
+    float qty = (strategy.equity * (risk_pct / 100.0)) / close
+    strategy.entry("Long_W_" + str.tostring(pattern_id), strategy.long, qty=qty)
+    pattern_active := false
+
+// TP ve SL
+if strategy.position_size > 0 and not na(fib_target_price) and not na(base)
+    float stop_price = base * (1 - stop_buffer_pct / 100.0)
+    strategy.exit("TP_SL_W_" + str.tostring(pattern_id), from_entry="Long_W_" + str.tostring(pattern_id), limit=fib_target_price, stop=stop_price)
+
+// Basit çizimler (plot kullanımı güvenli olacak şekilde)
+plot(low1_price, title="Low1", color=color.green, linewidth=2)
+plot(peak_price, title="Peak", color=color.orange, linewidth=2)
+plot(low2_price, title="Low2", color=color.green, linewidth=2)
+plot(fib_target_price, title="FibTarget", color=color.red, linewidth=2, style=plot.style_line)
