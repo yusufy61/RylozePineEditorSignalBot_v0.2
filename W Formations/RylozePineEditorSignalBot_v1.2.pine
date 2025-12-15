@@ -1,4 +1,5 @@
 // RylozePineEditorSignalBot_v1.2.pine
+// Bu versiyonda grafik üzerinde al ve sat noktalarını gösterecek ayarlar eklenmiştir.
 
 //@version=5
 strategy("Ryloze 15m W-Formasyonu + Görsel Sinyalli", overlay=true, default_qty_type=strategy.cash, default_qty_value=1000)
