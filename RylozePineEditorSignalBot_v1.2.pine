@@ -1,2 +1,129 @@
 // RylozePineEditorSignalBot_v1.2.pine
 
+//@version=5
+strategy("Ryloze 15m W-Formasyonu + Görsel Sinyalli", overlay=true, default_qty_type=strategy.cash, default_qty_value=1000)
+
+// --- GİRDİLER ---
+left          = input.int(3, "Pivot Sol (bars)", minval=1)
+right         = input.int(3, "Pivot Sağ (bars)", minval=1)
+fib_mult      = input.float(1.272, "Fibonacci Uzantı Hedefi", step=0.001)
+tolerance_pct = input.float(2.0, "Dipler Arası Tolerans (%)", step=0.1)
+min_height_pct= input.float(0.5, "Minimum Yükseklik (Tepe-Dip) (%)", step=0.1)
+risk_pct      = input.float(1.0, "Risk Yüzdesi (%)", step=0.1)
+stop_buffer_pct = input.float(0.5, "Stop Buffer (%) Dip Altına", step=0.1)
+
+// --- DEĞİŞKENLER ---
+var float low1_price   = na
+var int   low1_bar     = na
+var float peak_price   = na
+var int   peak_bar     = na
+var float low2_price   = na
+var int   low2_bar     = na
+
+var bool pattern_active = false
+var int  pattern_id     = 0
+var float base_price    = na // Stop referans noktası
+var float entry_target  = na // Kırılım seviyesi (Peak)
+var float fib_target    = na // Kar al noktası
+
+// --- HESAPLAMALAR ---
+pl = ta.pivotlow(low, left, right)
+ph = ta.pivothigh(high, left, right)
+
+// 1. Pivot Low Geldiğinde
+if not na(pl)
+    int pl_bar = bar_index - right
+    float pl_val = pl
+    
+    // Eğer henüz ilk dip yoksa veya pattern sıfırlandıysa
+    if na(low1_price)
+        low1_price := pl_val
+        low1_bar   := pl_bar
+        // Diğerlerini sıfırla
+        peak_price := na
+        low2_price := na
+        pattern_active := false
+    else
+        // Zaten bir low1 ve bir peak varsa, bu low2 olabilir mi?
+        if not na(peak_price) and pl_bar > peak_bar
+            low2_price := pl_val
+            low2_bar   := pl_bar
+            
+            // W Formasyonu Kuralları
+            float local_base = math.min(low1_price, low2_price)
+            float diff_pct   = local_base != 0 ? (math.abs(low1_price - low2_price) / local_base) * 100 : 100
+            float height_pct = local_base != 0 ? ((peak_price - local_base) / local_base) * 100 : 0
+            
+            if diff_pct <= tolerance_pct and height_pct >= min_height_pct
+                pattern_active := true
+                pattern_id    += 1
+                base_price    := local_base
+                entry_target  := peak_price
+                // Hedef Hesapla
+                fib_target    := base_price + (peak_price - base_price) * fib_mult
+            else
+                // Formasyon bozuksa, bu yeni dibi low1 yap ve süreci baştan başlat
+                low1_price := low2_price
+                low1_bar   := low2_bar
+                peak_price := na
+                low2_price := na
+                base_price := na
+                pattern_active := false
+
+// 2. Pivot High Geldiğinde
+if not na(ph)
+    int ph_bar = bar_index - right
+    // Eğer low1 varsa ve bu tepe ondan sonraysa peak olarak kaydet
+    if not na(low1_price) and ph_bar > low1_bar
+        peak_price := ph
+        peak_bar   := ph_bar
+        // Yeni bir tepe geldiyse low2 arayışı sıfırlanır
+        low2_price := na
+        pattern_active := false
+
+// --- STRATEJİ GİRİŞ KOŞULU ---
+// Fiyat, belirlenen 'Peak' seviyesini yukarı kırarsa
+longCondition = pattern_active and not na(entry_target) and ta.crossover(close, entry_target) and strategy.position_size == 0
+
+if longCondition
+    float stop_level = base_price * (1 - stop_buffer_pct / 100.0)
+    float qty_pos = (strategy.equity * (risk_pct / 100.0)) / close
+    
+    strategy.entry("W-Long", strategy.long, qty=qty_pos, comment="W Formasyonu")
+    strategy.exit("Çıkış", "W-Long", limit=fib_target, stop=stop_level, comment_loss="Stop", comment_profit="TP")
+    
+    pattern_active := false // İşleme girdik, patterni tüket
+
+// --- GÖRSELLEŞTİRME (EN ÖNEMLİ KISIM) ---
+
+// 1. AL Sinyali Etiketi
+plotshape(longCondition, title="AL Sinyali", text="AL\nRyloze", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white, size=size.small)
+
+// 2. SAT / POZ KAPAT Sinyali Etiketi
+// Pozisyonun bir önceki bar açık olup şu an 0 olduğunu kontrol ediyoruz
+bool justClosed = strategy.position_size[1] > 0 and strategy.position_size == 0
+plotshape(justClosed, title="Pozisyon Kapandı", text="KAPAT", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white, size=size.small)
+
+// 3. Destek ve Direnç Çizgileri (Sadece Pattern Aktifken veya Pozisyondayken Görünür)
+// Boyun Çizgisi (Giriş seviyesi)
+plot(pattern_active or strategy.position_size > 0 ? entry_target : na, title="Boyun Çizgisi", color=color.new(color.orange, 0), style=plot.style_linebr, linewidth=2)
+
+// Stop Seviyesi (Sadece Pozisyondayken Göster)
+var float active_stop = na
+if strategy.position_size > 0
+    active_stop := base_price * (1 - stop_buffer_pct / 100.0)
+else
+    active_stop := na
+plot(active_stop, title="Stop Seviyesi", color=color.new(color.red, 30), style=plot.style_linebr, linewidth=2)
+
+// TP Seviyesi (Sadece Pozisyondayken Göster)
+var float active_tp = na
+if strategy.position_size > 0
+    active_tp := fib_target
+else
+    active_tp := na
+plot(active_tp, title="Hedef (TP)", color=color.new(color.green, 30), style=plot.style_linebr, linewidth=2)
+
+// Pivot Noktalarını İşaretle (Debug için)
+// plotchar(pl, title="Dip", char="L", location=location.belowbar, color=color.gray, size=size.tiny)
+// plotchar(ph, title="Tepe", char="H", location=location.abovebar, color=color.gray, size=size.tiny)
