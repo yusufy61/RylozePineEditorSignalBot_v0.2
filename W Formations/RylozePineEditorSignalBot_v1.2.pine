@@ -2,7 +2,7 @@
 // Bu versiyonda grafik üzerinde al ve sat noktalarını gösterecek ayarlar eklenmiştir.
 
 //@version=5
-strategy("Ryloze 15m W-Formasyonu + Görsel Sinyalli", overlay=true, default_qty_type=strategy.cash, default_qty_value=1000)
+strategy("Ryloze 15m W-Formasyonu", overlay=true, default_qty_type=strategy.cash, default_qty_value=1000)
 
 // --- GİRDİLER ---
 left          = input.int(3, "Pivot Sol (bars)", minval=1)
